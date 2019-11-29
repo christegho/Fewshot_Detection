@@ -97,7 +97,7 @@ nsamples          = len(trainlist)
 init_width        = model.width
 init_height       = model.height
 init_epoch        = 0 if cfg.tuning else model.seen/nsamples
-max_epochs        = max_batches*batch_size/nsamples+1
+max_epochs        = max_batches*batch_size//nsamples+1
 max_epochs        = int(math.ceil(cfg.max_epoch*1./cfg.repeat)) if cfg.tuning else max_epochs 
 print(cfg.repeat, nsamples, max_batches, batch_size)
 print(num_workers)
@@ -321,6 +321,6 @@ if evaluate:
     logging('evaluating ...')
     test(0)
 else:
-    for epoch in range(init_epoch, max_epochs):
+    for epoch in range(init_epoch, int(max_epochs)):
         train(epoch)
         # test(epoch)
