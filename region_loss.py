@@ -66,7 +66,7 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
             cur_ious = torch.max(cur_ious, bbox_ious(cur_pred_boxes, cur_gt_boxes, x1y1x2y2=False))
         # Find anchors with iou > sil_thresh
         # no loss for that one
-        conf_mask[b][cur_ious>sil_thresh] = 0
+        conf_mask[b][(cur_ious>sil_thresh).view_as(conf_mask[b])] = 0
     if seen < 12800:
        if anchor_step == 4:
            tx = torch.FloatTensor(anchors).view(nA, anchor_step).index_select(1, torch.LongTensor([2])).view(1,nA,1,1).repeat(nB,1,nH,nW)
@@ -123,6 +123,8 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
             ty[b][best_n][gj][gi] = target[b][t*5+2] * nH - gj
             tw[b][best_n][gj][gi] = math.log(gw/anchors[anchor_step*best_n])
             th[b][best_n][gj][gi] = math.log(gh/anchors[anchor_step*best_n+1])
+            pred_box=pred_box.double()
+            # import pdb; pdb.set_trace()
             iou = bbox_iou(gt_box, pred_box, x1y1x2y2=False) # best_iou
             tconf[b][best_n][gj][gi] = iou
             tcls[b][best_n][gj][gi] = target[b][t*5]
@@ -291,11 +293,18 @@ class RegionLossV2(nn.Module):
         anchor_h = torch.Tensor(self.anchors).view(nA, self.anchor_step).index_select(1, torch.LongTensor([1])).cuda()
         anchor_w = anchor_w.repeat(nB, 1).repeat(1, 1, nH*nW).view(nB*nA*nH*nW)
         anchor_h = anchor_h.repeat(nB, 1).repeat(1, 1, nH*nW).view(nB*nA*nH*nW)
+        """
         pred_boxes[0] = x.data + grid_x
         pred_boxes[1] = y.data + grid_y
         pred_boxes[2] = torch.exp(w.data) * anchor_w
         pred_boxes[3] = torch.exp(h.data) * anchor_h
+        """
+        pred_boxes[0] = torch.reshape(x.data, (1,nB*nA*nH*nW)) + grid_x
+        pred_boxes[1] = torch.reshape(y.data, (1,nB*nA*nH*nW)) + grid_y
+        pred_boxes[2] = torch.reshape(torch.exp(w.data), (1,nB*nA*nH*nW)) * anchor_w
+        pred_boxes[3] = torch.reshape(torch.exp(h.data), (1,nB*nA*nH*nW)) * anchor_h
         pred_boxes = convert2cpu(pred_boxes.transpose(0,1).contiguous().view(-1,4))
+
         t2 = time.time()
 
         nGT, nCorrect, coord_mask, conf_mask, cls_mask, tx, ty, tw, th, tconf,tcls = build_targets(pred_boxes, target.data, self.anchors, nA, nC, \
@@ -331,8 +340,8 @@ class RegionLossV2(nn.Module):
         conf_mask  = Variable(conf_mask.cuda().sqrt())
         # cls_mask   = Variable(cls_mask.view(-1, 1).repeat(1,cs).cuda())
         cls        = cls[Variable(cls_mask.view(-1, 1).repeat(1,cs).cuda())].view(-1, cs)  
-
-        tcls = Variable(tcls.view(-1)[cls_mask].long().cuda())
+        # import pdb; pdb.set_trace()
+        tcls = Variable(tcls[cls_mask].long().cuda())
         ClassificationLoss = nn.CrossEntropyLoss(size_average=False)
        
         t3 = time.time()
