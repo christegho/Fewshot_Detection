@@ -17,7 +17,7 @@ import pdb
 def topath(p):
     return p.replace('scratch', 'tmp_scratch/basilisk')
 
-def loadlines(root, checkvalid=True):
+def loadlines(root, checkvalid=False):
     if is_dict(root):
         lines = []
         with open(root, 'r') as f:
@@ -90,7 +90,6 @@ def load_metadict(metapath, repeat=1):
 
         metadict = {line[0]: loadlines(line[1]) for line in files}
 
-    pdb.set_trace()
     # Remove base-class images
     for k in metadict.keys():
         if k not in cfg.novel_classes:
@@ -273,6 +272,7 @@ class listDataset(Dataset):
     @staticmethod
     def is_valid(imgpath):
         labpath = listDataset.get_labpath(imgpath.rstrip())
+        import pdb; pdb.set_trace()
         if os.path.getsize(labpath):
             bs = np.loadtxt(labpath)
             if bs is not None:
@@ -315,6 +315,7 @@ class MetaDataset(Dataset):
             metafiles = []
             for line in f.readlines():
                 pair = line.rstrip().split()
+#                 import pdb; pdb.set_trace()
                 if len(pair) == 2:
                     pass
                 elif len(pair) == 4:

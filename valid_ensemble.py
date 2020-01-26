@@ -10,10 +10,10 @@ import os
 import pdb
 
 
-def valid(datacfg, darknetcfg, learnetcfg, weightfile, outfile, use_baserw=False):
+def valid(datacfg, darknetcfg, learnetcfg, weightfile, outfile, traindict, use_baserw=False):
     options = read_data_cfg(datacfg)
     valid_images = options['valid']
-    metadict = options['meta']
+    metadict = traindict #options['meta']
     # name_list = options['names']
     # backup = cfg.backup
     ckpt = weightfile.split('/')[-1].split('.')[0]
@@ -27,7 +27,7 @@ def valid(datacfg, darknetcfg, learnetcfg, weightfile, outfile, use_baserw=False
     with open(valid_images) as fp:
         tmp_files = fp.readlines()
         valid_files = [item.rstrip() for item in tmp_files]
-    
+        
     m = Darknet(darknetcfg, learnetcfg)
     m.print_network()
     m.load_weights(weightfile)
@@ -73,6 +73,7 @@ def valid(datacfg, darknetcfg, learnetcfg, weightfile, outfile, use_baserw=False
             dynamic_weights[i] = torch.stack(new_weight)
             print(dynamic_weights[i].shape)
     else:
+        
         metaset = dataset.MetaDataset(metafiles=metadict, train=False, ensemble=True, with_ids=True)
         metaloader = torch.utils.data.DataLoader(
             metaset,
@@ -82,11 +83,13 @@ def valid(datacfg, darknetcfg, learnetcfg, weightfile, outfile, use_baserw=False
         )
         # metaloader = iter(metaloader)
         n_cls = len(metaset.classes)
-
+        print(n_cls)
+        
         enews = [0.0] * n_cls
         cnt = [0.0] * n_cls
         print('===> Generating dynamic weights...')
         kkk = 0
+#         import pdb; pdb.set_trace
         for metax, mask, clsids in metaloader:
             print('===> {}/{}'.format(kkk, len(metaset) // 64))
             kkk += 1
@@ -95,30 +98,31 @@ def valid(datacfg, darknetcfg, learnetcfg, weightfile, outfile, use_baserw=False
             dws = m.meta_forward(metax, mask)
             dw = dws[0]
             for ci, c in enumerate(clsids):
+#                 print(ci, c, enews[c], cnt[c], dw[ci])
                 enews[c] = enews[c] * cnt[c] / (cnt[c] + 1) + dw[ci] / (cnt[c] + 1)
                 cnt[c] += 1
         dynamic_weights = [torch.stack(enews)]
-
-        # import pickle
-        # with open('data/rws/voc_novel2_.pkl', 'wb') as f:
-        #     tmp = [x.data.cpu().numpy() for x in dynamic_weights]
-        #     pickle.dump(tmp, f)
-        # import pdb; pdb.set_trace()
-
+#         import pdb; pdb.set_trace()
+#         import pickle
+#         with open('dynamic_weights.pkl', 'wb') as f:
+#             tmp = [x.data.cpu().numpy() for x in dynamic_weights]
+#             pickle.dump(tmp, f)
+#         import pdb; pdb.set_trace()
+        
         if use_baserw:
             import pickle
             # f = 'data/rws/voc_novel{}_.pkl'.format(cfg.novelid)
-            f = 'data/rws/voc_novel{}_.pkl'.format(0)
+            f = 'dynamic_weights.pkl'.format(0)
             print('===> Loading from {}...'.format(f))
             with open(f, 'rb') as f:
             # with open('data/rws/voc_novel0_.pkl', 'rb') as f:
                 rws = pickle.load(f)
-                rws = [Variable(torch.from_numpy(rw)).cuda() for rw in rws]
-                tki = cfg._real_base_ids
-                for i in range(len(rws)):
-                    dynamic_weights[i][tki] = rws[i][tki]
-                    # dynamic_weights[i] = rws[i]
-            # pdb.set_trace()
+                dynamic_weights = [Variable(torch.from_numpy(rw)).cuda() for rw in rws]
+        #             tki = cfg._real_base_ids
+        #             for i in range(len(rws)):
+        #                 dynamic_weights[i][tki] = rws[i][tki]
+                            # dynamic_weights[i] = rws[i]
+
 
 
     if not os.path.exists(prefix):
@@ -135,6 +139,7 @@ def valid(datacfg, darknetcfg, learnetcfg, weightfile, outfile, use_baserw=False
     conf_thresh = 0.005
     nms_thresh = 0.45
     for batch_idx, (data, target) in enumerate(valid_loader):
+#         import pdb; pdb.set_trace()
         data = data.cuda()
         data = Variable(data, volatile = True)
         output = m.detect_forward(data, dynamic_weights)
@@ -152,7 +157,7 @@ def valid(datacfg, darknetcfg, learnetcfg, weightfile, outfile, use_baserw=False
         else:
             assert output.size(0) % n_cls == 0
             bs = output.size(0) // n_cls
-
+#         import pdb; pdb.set_trace()
         for b in range(bs):
             lineId = lineId + 1
             imgpath = valid_dataset.lines[lineId].rstrip()
@@ -184,16 +189,17 @@ def valid(datacfg, darknetcfg, learnetcfg, weightfile, outfile, use_baserw=False
 
 if __name__ == '__main__':
     import sys
-    if len(sys.argv) in [5,6,7]:
+    if len(sys.argv) in [5,6,7,8]:
         datacfg = sys.argv[1]
         darknet = parse_cfg(sys.argv[2])
         learnet = parse_cfg(sys.argv[3])
         weightfile = sys.argv[4]
-        if len(sys.argv) >= 6:
-            gpu = sys.argv[5]
+        traindict = sys.argv[5]
+        if len(sys.argv) >= 7:
+            gpu = sys.argv[6]
         else:
             gpu = '0'
-        if len(sys.argv) == 7:
+        if len(sys.argv) == 8:
             use_baserw = True
         else:
             use_baserw = False
@@ -210,7 +216,7 @@ if __name__ == '__main__':
         cfg.config_net(net_options)
 
         outfile = 'comp4_det_test_'
-        valid(datacfg, darknet, learnet, weightfile, outfile, use_baserw)
+        valid(datacfg, darknet, learnet, weightfile, outfile, traindict, use_baserw)
     else:
         print('Usage:')
         print(' python valid.py datacfg cfgfile weightfile')

@@ -52,10 +52,11 @@ def parse_rec(filename):
         obj_struct['truncated'] = int(obj.find('truncated').text)
         obj_struct['difficult'] = int(obj.find('difficult').text)
         bbox = obj.find('bndbox')
-        obj_struct['bbox'] = [int(bbox.find('xmin').text),
-                              int(bbox.find('ymin').text),
-                              int(bbox.find('xmax').text),
-                              int(bbox.find('ymax').text)]
+#         import pdb; pdb.set_trace()
+        obj_struct['bbox'] = [int(float(bbox.find('xmin').text)),
+                              int(float(bbox.find('ymin').text)),
+                              int(float(bbox.find('xmax').text)),
+                              int(float(bbox.find('ymax').text))]
         objects.append(obj_struct)
 
     return objects
@@ -134,33 +135,35 @@ def voc_eval(detpath,
         lines = f.readlines()
     imagenames = [x.strip() for x in lines]
 
-    if not os.path.isfile(cachefile):
-        # load annots
-        recs = {}
-        for i, imagename in enumerate(imagenames):
-            recs[imagename] = parse_rec(annopath.format(imagename))
-            if i % 100 == 0:
-                print 'Reading annotation for {:d}/{:d}'.format(
-                    i + 1, len(imagenames))
-        # save
-        print 'Saving cached annotations to {:s}'.format(cachefile)
-        with open(cachefile, 'w') as f:
-            cPickle.dump(recs, f)
-    else:
-        # load
-        with open(cachefile, 'r') as f:
-            recs = cPickle.load(f)
+#     if not os.path.isfile(cachefile):
+    # load annots
+    recs = {}
+    for i, imagename in enumerate(imagenames):
+        recs[imagename] = parse_rec(annopath.format(imagename.split('/')[-1].split('.')[0]))
+        if i % 100 == 0:
+            print 'Reading annotation for {:d}/{:d}'.format(
+                i + 1, len(imagenames))
+#         # save
+#         print 'Saving cached annotations to {:s}'.format(cachefile)
+#         with open(cachefile, 'w') as f:
+#             cPickle.dump(recs, f)
+#     else:
+#         # load
+#         with open(cachefile, 'r') as f:
+#             recs = cPickle.load(f)
 
     # extract gt objects for this class
     class_recs = {}
     npos = 0
     for imagename in imagenames:
-        R = [obj for obj in recs[imagename] if obj['name'] == classname]
+        imagename_ = imagename.split('/')[-1].split('.')[0]
+#         import pdb; pdb.set_trace()
+        R = [obj for obj in recs[imagename] if (obj['name'] == classname or (obj['name'] == 'canister' and classname=='bird'))]
         bbox = np.array([x['bbox'] for x in R])
         difficult = np.array([x['difficult'] for x in R]).astype(np.bool)
         det = [False] * len(R)
         npos = npos + sum(~difficult)
-        class_recs[imagename] = {'bbox': bbox,
+        class_recs[imagename_] = {'bbox': bbox,
                                  'difficult': difficult,
                                  'det': det}
 
@@ -195,6 +198,9 @@ def voc_eval(detpath,
     tp = np.zeros(nd)
     fp = np.zeros(nd)
     for d in range(nd):
+#         import pdb; pdb.set_trace()
+        if image_ids[d] not in class_recs:
+            continue
         R = class_recs[image_ids[d]]
         bb = BB[d, :].astype(float)
         ovmax = -np.inf
@@ -245,7 +251,7 @@ def voc_eval(detpath,
 
 def _do_python_eval(res_prefix, novel=False, output_dir = 'output'):
     # _devkit_path = '/data2/bykang/pytorch-yolo2/VOCdevkit'
-    _devkit_path = '/tmp_scratch/basilisk/bykang/datasets/VOCdevkit'
+    _devkit_path = '/home/chris/safariland-element/CanistersRealTrainVal'
     _year = '2007'
     _classes = ('__background__', # always index 0
         'aeroplane', 'bicycle', 'bird', 'boat',
@@ -264,12 +270,10 @@ def _do_python_eval(res_prefix, novel=False, output_dir = 'output'):
     filename = res_prefix + '{:s}.txt'
     annopath = os.path.join(
         _devkit_path,
-        'VOC' + _year,
         'Annotations',
         '{:s}.xml')
     imagesetfile = os.path.join(
         _devkit_path,
-        'VOC' + _year,
         'ImageSets',
         'Main',
         'test.txt')
