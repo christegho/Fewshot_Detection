@@ -8,7 +8,8 @@ from cfg import cfg
 from cfg import parse_cfg
 import os
 import pickle
-import sys
+import argparse
+
 
 def valid(valid_images, darknetcfg, learnetcfg, weightfile, dynamic_weight_file, 
           prefix, conf_thresh, nms_thresh):
@@ -24,7 +25,7 @@ def valid(valid_images, darknetcfg, learnetcfg, weightfile, dynamic_weight_file,
     
     print('===> Loading dynamic weights from {}...'.format(dynamic_weight_file))
     with open(dynamic_weight_file, 'rb') as f:
-        rws = pickle.load(dynamic_weight_file)
+        rws = pickle.load(f)
         dynamic_weights = [Variable(torch.from_numpy(rw)).cuda() for rw in rws]
         
     valid_dataset = dataset.listDataset(valid_images, shape=(m.width, m.height),
@@ -104,43 +105,43 @@ def plot_boxes_(imgpath, boxes, savename):
     return img
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Run inference with the few shot detector \
+        and draw bounding boxes for cansiters.')
+    parser.add_argument('--datacfg', type=str, default='cfg/metatune.data', 
+                        help='cfg file for the data')
+    parser.add_argument('--darknet', type=str, default='cfg/darknet_dynamic.cfg',
+                        help='cfg file for darknet')
+    parser.add_argument('--learnet', type=str, default='cfg/reweighting_net.cfg',
+                        help='cfg file for the reweighting net')
+    parser.add_argument('--weightfile', type=str, help='path for the weightfile')
+    parser.add_argument('--img_dest', type=str, help='path for the folder for where to \
+                        store images and the bounding boxes drawn')
+    parser.add_argument('--valid_images', type=str, help='path for the text file \
+                        with the list of images to run inference on',
+                       default='/home/chris/safariland-element/val_can.txt')
+    parser.add_argument('--dynamic_weight_file', type=str, default='weights/dynamic_weights.pkl', 
+                        help='path for dynamic weights')
+    parser.add_argument('--conf_thresh', type=float, default=0.2, help='confidence threshold')
+    parser.add_argument('--nms_thresh', type=float, default=0.45, help='nms threshold')
+    parser.add_argument('--gpu', type=str, default='0', help='gpu to use')
     
-    if len(sys.argv) in [5,6,7]:
-        datacfg = sys.argv[1]
-        darknet = parse_cfg(sys.argv[2])
-        learnet = parse_cfg(sys.argv[3])
-        weightfile = sys.argv[4]
-        prefix = 'preds_2'
-        conf_thresh = 0.2
-        nms_thresh = 0.45
-        valid_images = '/home/chris/safariland-element/val_can.txt'
-        dynamic_weight_file = 'dynamic_weights.pkl'
+    args = parser.parse_args()
 
-        
-        if len(sys.argv) >= 6:
-            gpu = sys.argv[5]
-        else:
-            gpu = '0'
-        if len(sys.argv) == 7:
-            use_baserw = False
-        else:
-            use_baserw = False
+    data_options  = read_data_cfg(args.datacfg)
+    darknet = parse_cfg(args.darknet)
+    learnet = parse_cfg(args.learnet)
+    net_options   = darknet[0]
+    meta_options  = learnet[0]
+    data_options['gpus'] = args.gpu
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
-        data_options  = read_data_cfg(datacfg)
-        net_options   = darknet[0]
-        meta_options  = learnet[0]
-        data_options['gpus'] = gpu
-        os.environ['CUDA_VISIBLE_DEVICES'] = gpu
+    # Configure options
+    cfg.config_data(data_options)
+    cfg.config_meta(meta_options)
+    cfg.config_net(net_options)
 
-        # Configure options
-        cfg.config_data(data_options)
-        cfg.config_meta(meta_options)
-        cfg.config_net(net_options)
+    if not os.path.exists(args.img_dest):
+        os.makedirs(args.img_dest)
 
-        if not os.path.exists(prefix):
-            os.makedirs(prefix)
-        valid(valid_images, darknet, learnet, weightfile, dynamic_weight_file, 
-              prefix, conf_thresh, nms_thresh)
-    else:
-        print('Usage:')
-        print(' python valid.py datacfg cfgfile weightfile')
+    valid(args.valid_images, darknet, learnet, args.weightfile, args.dynamic_weight_file, 
+          args.img_dest, args.conf_thresh, args.nms_thresh)
