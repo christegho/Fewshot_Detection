@@ -7,17 +7,11 @@ from utils import *
 from cfg import cfg
 from cfg import parse_cfg
 import os
-import pdb
+import pickle
+import sys
 
-
-def valid(datacfg, darknetcfg, learnetcfg, weightfile, prefix, use_baserw=False):
-    
-    options = read_data_cfg(datacfg)
-    valid_images = options['valid']
-    ckpt = weightfile.split('/')[-1].split('.')[0]
-    backup = weightfile.split('/')[-2]
-    ckpt_pre = '/ene'
-
+def valid(valid_images, darknetcfg, learnetcfg, weightfile, dynamic_weight_file, 
+          prefix, conf_thresh, nms_thresh):
     with open(valid_images) as fp:
         tmp_files = fp.readlines()
         valid_files = [item.rstrip() for item in tmp_files]
@@ -27,7 +21,12 @@ def valid(datacfg, darknetcfg, learnetcfg, weightfile, prefix, use_baserw=False)
     m.load_weights(weightfile)
     m.cuda()
     m.eval()
-
+    
+    print('===> Loading dynamic weights from {}...'.format(dynamic_weight_file))
+    with open(dynamic_weight_file, 'rb') as f:
+        rws = pickle.load(dynamic_weight_file)
+        dynamic_weights = [Variable(torch.from_numpy(rw)).cuda() for rw in rws]
+        
     valid_dataset = dataset.listDataset(valid_images, shape=(m.width, m.height),
                        shuffle=False,
                        transform=transforms.Compose([
@@ -40,19 +39,8 @@ def valid(datacfg, darknetcfg, learnetcfg, weightfile, prefix, use_baserw=False)
         valid_dataset, batch_size=valid_batchsize, shuffle=False, **kwargs) 
 
     n_cls = 20
-
-    import pickle
-    f = 'dynamic_weights.pkl'.format(0)
-    print('===> Loading from {}...'.format(f))
-    with open(f, 'rb') as f:
-        rws = pickle.load(f)
-        dynamic_weights = [Variable(torch.from_numpy(rw)).cuda() for rw in rws]
-
-
     lineId = -1
     
-    conf_thresh = 0.2
-    nms_thresh = 0.45
     for batch_idx, (data, target) in enumerate(valid_loader):
         data = data.cuda()
         data = Variable(data, volatile = True)
@@ -63,23 +51,21 @@ def valid(datacfg, darknetcfg, learnetcfg, weightfile, prefix, use_baserw=False)
         else:
             output = output.data
 
-        # import pdb; pdb.set_trace()
-        batch_boxes = get_region_boxes_v2(output, n_cls, conf_thresh, m.num_classes, m.anchors, m.num_anchors, 0, 1)
+        batch_boxes = get_region_boxes_v2(output, n_cls, 
+            conf_thresh, m.num_classes, m.anchors, m.num_anchors, 0, 1)
 
         if isinstance(output, tuple):
             bs = output[0].size(0)
         else:
             assert output.size(0) % n_cls == 0
             bs = output.size(0) // n_cls
-#         import pdb; pdb.set_trace()
         for b in range(bs):
             lineId = lineId + 1
             imgpath = valid_dataset.lines[lineId].rstrip()
             print(imgpath)
             imgid = os.path.basename(imgpath).split('.')[0]
             width, height = get_image_size(imgpath)
-            i=2
-            # oi = i * bs + b
+            i = 2
             oi = b * n_cls + i
             boxes = batch_boxes[oi]
             boxes = nms(boxes, nms_thresh)
@@ -96,53 +82,41 @@ def valid(datacfg, darknetcfg, learnetcfg, weightfile, prefix, use_baserw=False)
                     cls_id = box[6+2*j]
                     prob =det_conf * cls_conf
                 boxes_ += [[prob, x1, y1, x2, y2]]
-#                     fps[i].write('%s %f %f %f %f %f\n' % (imgid, prob, x1, y1, x2, y2))
-            plot_boxes_(imgpath, boxes, '{}/{}.jpg'.format(prefix, imgid))
+
+            plot_boxes_(imgpath, boxes_, '{}/{}.jpg'.format(prefix, imgid))
 
 
 
-def plot_boxes_(imgpath, boxes, savename=None):
+def plot_boxes_(imgpath, boxes, savename):
     img = Image.open(imgpath).convert('RGB')
-    colors = torch.FloatTensor([[1,0,1],[0,0,1],[0,1,1],[0,1,0],[1,1,0],[1,0,0]]);
-    def get_color(c, x, max_val):
-        ratio = float(x)/max_val * 5
-        i = int(math.floor(ratio))
-        j = int(math.ceil(ratio))
-        ratio = ratio - i
-        r = (1-ratio) * colors[i][c] + ratio*colors[j][c]
-        return int(r*255)
-
     width = img.width
     height = img.height
     draw = ImageDraw.Draw(img)
     for i in range(len(boxes)):
         box = boxes[i]
         x1, y1, x2, y2 = box[1:5]
-
-
-        rgb = (255, 0, 0)
         cls_conf = box[0]
-        classes = 20
-        offset = 2 * 123457 % classes
-        red   = get_color(2, offset, classes)
-        green = get_color(1, offset, classes)
-        blue  = get_color(0, offset, classes)
-        rgb = (red, green, blue)
+        rgb = (0, 255, 127)
         draw.text((x1, y1), 'canister, {}'.format(cls_conf), fill=rgb)
         draw.rectangle([x1, y1, x2, y2], outline = rgb)
-    if savename:
-        print("save plot results to %s" % savename)
-        img.save(savename)
+    print("save plot results to %s" % savename)
+    img.save(savename)
     return img
 
 if __name__ == '__main__':
-    import sys
+    
     if len(sys.argv) in [5,6,7]:
         datacfg = sys.argv[1]
         darknet = parse_cfg(sys.argv[2])
         learnet = parse_cfg(sys.argv[3])
         weightfile = sys.argv[4]
         prefix = 'preds_2'
+        conf_thresh = 0.2
+        nms_thresh = 0.45
+        valid_images = '/home/chris/safariland-element/val_can.txt'
+        dynamic_weight_file = 'dynamic_weights.pkl'
+
+        
         if len(sys.argv) >= 6:
             gpu = sys.argv[5]
         else:
@@ -165,7 +139,8 @@ if __name__ == '__main__':
 
         if not os.path.exists(prefix):
             os.makedirs(prefix)
-        valid(datacfg, darknet, learnet, weightfile, prefix, use_baserw)
+        valid(valid_images, darknet, learnet, weightfile, dynamic_weight_file, 
+              prefix, conf_thresh, nms_thresh)
     else:
         print('Usage:')
         print(' python valid.py datacfg cfgfile weightfile')
